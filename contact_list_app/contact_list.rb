@@ -5,102 +5,99 @@ require_relative 'contact'
 # Interfaces between a user and their contact list. Reads from and writes to standard I/O.
 class ContactList
 
-  attr_reader :contacts
+  def initialize
+  end
 
-  def initialize(filename)
-    
-    Contact.load_contacts(filename)
-    @contacts = Contact.contacts
+  def run(arguments)
 
-    user_command = ARGV[0]
+    user_command = arguments.shift
 
     if user_command
       input = user_command.downcase
+
       case input
 
-      when "list"
-        start_index = 0
-        end_index = 4
-        puts contacts[start_index..end_index]
-        loop do
-          begin
-            print "Press enter for next 5 contacts, or press any other key followed by enter to exit."
-            check_enter_key = get_user_input
-            break if check_enter_key != "\n"
-            start_index += 5
-            end_index += 5
-            raise IndexError, "You are at the end of the list!" if end_index >= contacts.count
-            puts contacts[start_index..end_index]
-          rescue IndexError => ex
-            end_index = contacts.count
-            puts contacts[start_index...end_index]
-            puts "#{ex.message}"
-          end
-        end
+      when "list"      
+        offset = 0  
+        begin
+          puts Contact.all(offset)
+          offset += 5
+          puts "Press ENTER for more. Type anything to exit."
+          input = STDIN.gets
+        end while input == "\n"
 
       when "new"
         begin
+          contact_entry = Contact.new
           print "Enter a name: "
-          name = get_user_input.strip
+          contact_entry.name = STDIN.gets.strip
           print "Enter an email: "
-          email = get_user_input.strip
-          Contact.raise_duplicate_email_error(email)
-          contact_info = {}
-
-          loop do
-            print "Would you like to enter a number? (Y for YES): "
-            response = get_user_input.strip.upcase
-            if response == 'Y'
-              print "Enter a label (mobile, home, etc.): "
-              label = get_user_input.strip
-              print "Enter a number: "
-              number = get_user_input.strip
-              contact_info[label] = number
-            else
-              break
-            end
-          end
+          contact_entry.email = STDIN.gets.strip
+          contact_entry.save
+        rescue EmailAlreadyExistsError
+          puts "Insert aborted. Contact already exists."
+        end
         
-          puts Contact.create(name, email, contact_info)
+      when "show" 
+        id = arguments.shift.to_i
+        contact_entry = Contact.find(id)
+        if contact_entry
+          puts contact_entry
+          puts "Numbers for this contact:"
+          puts contact_entry.numbers
+        else
+          puts "No contact details for this ID."
+        end
+        
+      when "search"
+        search_term = arguments.shift.to_s
+        contact_entries = Contact.search(search_term)
+        puts contact_entries
 
-        rescue ContactError => ex
-          puts "#{ex.message}"
+      when "update"
+        id = arguments.shift.to_i
+        contact_entry = Contact.find(id)
+        print "Enter a name: "
+        contact_entry.name = STDIN.gets.strip
+        print "Enter an email: "
+        contact_entry.email = STDIN.gets.strip
+        contact_entry.save
+
+        print "Would you like to add a phone number? (Y for YES)"
+        if STDIN.gets.upcase.strip == 'Y'
+          print "Enter a number: "
+          contact_entry.add_number(STDIN.gets.strip)
+          puts "Added number to #{contact_entry}"
         end
 
-      when "show"
-        id = ARGV[1].to_i
-        contact = Contact.find(id)
-        puts contact[0].name
-        puts contact[0].email
-
-      when "search"
-        search_term = ARGV[1].to_s
-        puts return_array = Contact.search(search_term)
-        puts "---"
-        puts "#{return_array.length} record(s) total."
+      when "destroy"
+        id = arguments.shift.to_i
+        contact_entry = Contact.find(id)
+        if contact_entry
+          contact_entry.destroy
+        else
+          puts "Contact does not exist."
+        end
 
       else
-        puts "That isn't a valid command. Type 'ruby.rb contact_list.rb' for a list of commands!'"
+        puts "That isn't a valid command. Type './contact_list.rb' for a list of commands!'"
       end
 
     else
-      run
+      show_commands
     end
 
   end
 
-  def run
+  def show_commands
     puts "Here is a list of available commands:"
     puts "  new - Create a new contact"
     puts "  list - List all contacts"
-    puts "  show - Show a contact"
+    puts "  show - Show a contact's including phone numbers"
     puts "  search - Search contacts"
-  end
-
-  def get_user_input
-    STDIN.gets
+    puts "  update - Update contacts"
   end
 
 end
 
-app = ContactList.new('MOCK_DATA.csv')
+app = ContactList.new.run(ARGV)

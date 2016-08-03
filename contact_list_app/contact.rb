@@ -1,108 +1,127 @@
 require 'csv'
+require 'pg'
+require_relative 'base'
 
-class ContactError < StandardError
+class EmailAlreadyExistsError < StandardError
 end
 
-# Represents a person in an address book.
-# The ContactList class will work with Contact objects instead of interacting with the CSV file directly
-class Contact
+class ContactDoesntExistError < StandardError
+end
+
+class Contact < Base
 
   attr_reader :id
 
-  attr_accessor :name, :email
+  attr_accessor :name, :email, :numbers
   
-  @@current_id = 1
-  @@contacts = []
-  @@filename = "MOCK_DATA.csv"
-  # Creates a new contact object
-  # @param name [String] The contact's name
-  # @param email [String] The contact's email address
-  def initialize(name, email, contact_info={})
-    # TODO: Assign parameter values to instance variables.
-    @id = @@current_id
-    @@current_id += 1
-    @name = name
-    @email = email
-    @contact_info = contact_info
+  def initialize(row={})
+    @id ||= row["id"]
+    @name ||= row["name"]
+    @email ||= row["email"]
+  end
+
+  def destroy
+    query = Contact.connection.exec_params('
+      DELETE FROM contacts
+      WHERE id = $1::int;',
+      [id]
+    )
+  end
+
+  def save
+    unless id
+      raise EmailAlreadyExistsError, "That email already exists!" if Contact.exists_email?(email)
+      query = Contact.connection.exec_params('
+        INSERT INTO contacts (name, email) 
+        VALUES ($1, $2) 
+        RETURNING id, name, email;',
+        [name, email]
+      )
+    else
+      query = Contact.connection.exec_params('
+        UPDATE contacts SET name = $2, email = $3
+        WHERE id = $1
+        RETURNING id, name, email;',
+        [id, name, email]
+      )
+    end
+  end
+
+  def add_number(number_string)
+    query = Contact.connection.exec_params('
+      INSERT INTO numbers (contact_id, phone_number)
+      VALUES ($1, $2);',
+    [id, number_string]
+    )
   end
 
   def to_s
-    "#{id}: #{name} (#{email})"
+    "ID: #{id} NAME: #{name} EMAIL: #{email}"
   end
 
-  # Provides functionality for managing contacts in the csv file.
+  def numbers
+    query = Contact.connection.exec_params('
+      SELECT phone_number FROM numbers
+      WHERE contact_id = $1',
+      [id] 
+      )
+    query.ntuples > 0 ? query.map{ |row| "#{row["phone_number"]}" } : "No numbers for this ID."
+  end
+
   class << self
 
-    def contacts
-      @@contacts
-    end
-
-    def contact_values_empty?(contact)
-      true if contact[0] == nil || contact[1] == nil
-    end
-
-    def in_bounds?(id)
-      if id > @@contacts.length || id <= 0
-        true 
-      else
-        false
+    def all(offset=0)
+      query = self.connection.exec('
+        SELECT *
+        FROM contacts 
+        ORDER BY id
+        LIMIT 5
+        OFFSET $1;',
+        [offset]
+      )
+      query.map do | row |
+        Contact.new(row)
       end
     end
 
-    def raise_duplicate_email_error(email)
-      @@contacts.each do |contact|
-        raise ContactError, "That email already exists in the database!" if contact.email.downcase == email.downcase
-      end
-    end
-
-    def load_contacts(filename)
-      contacts_data = CSV.read(filename)
-      contacts_data.each do | contact |
-        begin
-          raise ContactError, "Name and email values should not be nil in csv." if contact_values_empty?(contact)
-          name = contact[0].strip
-          email = contact[1].strip
-          @@contacts << Contact.new(name, email)
-        rescue ContactError => ex
-          puts "#{ex.message}"
-        end
-      end
-
-    end
-
-    def create(name, email, number={})
-      contacts_data = CSV.open(@@filename, 'a+')
-      contact = Contact.new(name, email, number)
-      contacts_data << [name, email, number]
-      "Contact has succesfully been initialized with an ID of #{contact.id}."
+    def create(name, email)
+      new_entry = Contact.new
+      new_entry.name = name
+      new_entry.email = email
+      new_entry.save
     end
     
-    # Find the Contact in the 'MOCK_DATA.csv' file with the matching id.
-    # @param id [Integer] the contact id
-    # @return [Contact, nil] the contact with the specified id. If no contact has the id, returns nil.
     def find(id)
-      # TODO: Find the Contact in the 'MOCK_DATA.csv' file with the matching id.
-      begin
-        raise IndexError, "That ID is out of bounds." if in_bounds?(id)
-        index = id - 1
-        return [@@contacts[index], nil]
-      rescue IndexError => ex
-        puts "#{ex.message}"
-        return nil
-      end
-
+      query = self.connection.exec_params('
+        SELECT * 
+        FROM contacts 
+        WHERE id = $1 
+        LIMIT 1;',
+        [id] 
+        )
+      Contact.new(query[0]) if query.ntuples > 0
     end
-    
-    # Search for contacts by either name or email.
-    # @param term [String] the name fragment or email fragment to search for
-    # @return [Array<Contact>] Array of Contact objects.
-    def search(term)
-      # TODO: Select the Contact instances from the 'MOCK_DATA.csv' file whose name or email attributes contain the search term.
-      found_contacts = @@contacts.select do |contact|
-        contact.name.downcase.include?(term.downcase) || contact.email.downcase.include?(term.downcase)
-      end
-      found_contacts
 
+    def search(term)
+      term = "%" + term + "%"
+      query = self.connection.exec_params('
+        SELECT *
+        FROM contacts
+        WHERE name ILIKE $1;',
+        [term]
+      )
+      query.map do | row |
+        Contact.new(row)
+      end
+    end
+
+    def exists_email?(email)
+      query = self.connection.exec_params('
+        SELECT *
+        FROM contacts
+        WHERE email ILIKE $1;',
+        [email])
+      query.ntuples > 0
     end
 
   end
