@@ -1,6 +1,6 @@
 #!/usr/local/rvm/rubies/ruby-2.3.0/bin/ruby
 
-require_relative 'contact'
+require_relative 'models/config'
 
 # Interfaces between a user and their contact list. Reads from and writes to standard I/O.
 class ContactList
@@ -20,7 +20,8 @@ class ContactList
       when "list"      
         offset = 0  
         begin
-          puts Contact.all(offset)
+          query_result = Contact.all.limit(5).offset(offset)
+          query_result.each { | contact | puts "ID: #{contact.id} Name: #{contact.name} Email: #{contact.email}" }
           offset += 5
           puts "Press ENTER for more. Type anything to exit."
           input = STDIN.gets
@@ -28,55 +29,66 @@ class ContactList
 
       when "new"
         begin
-          contact_entry = Contact.new
           print "Enter a name: "
-          contact_entry.name = STDIN.gets.strip
+          name = STDIN.gets.strip
           print "Enter an email: "
-          contact_entry.email = STDIN.gets.strip
-          contact_entry.save
-        rescue EmailAlreadyExistsError
-          puts "Insert aborted. Contact already exists."
+          email = STDIN.gets.strip.downcase
+          Contact.create(name: name, email: email)
         end
         
       when "show" 
         id = arguments.shift.to_i
-        contact_entry = Contact.find(id)
-        if contact_entry
-          puts contact_entry
+        query_result = Contact.find(id)
+        if query_result
+          puts "ID: #{query_result.id}"
+          puts "Name: #{query_result.name}"
+          puts "Email: #{query_result.email}"
           puts "Numbers for this contact:"
-          puts contact_entry.numbers
+          if query_result.numbers.size > 0
+            query_result.numbers.each { |number| puts number.phone_number }
+          else 
+            puts "No numbers for this contact."
+          end
         else
           puts "No contact details for this ID."
         end
         
       when "search"
-        search_term = arguments.shift.to_s
-        contact_entries = Contact.search(search_term)
-        puts contact_entries
+        search_term = "%#{arguments.shift.to_s}%"
+        query_result = Contact.where("name ILIKE ?",[search_term])
+        query_result.each { | contact | puts "ID: #{contact.id} Name: #{contact.name} Email: #{contact.email}" }
 
       when "update"
         id = arguments.shift.to_i
-        contact_entry = Contact.find(id)
-        print "Enter a name: "
-        contact_entry.name = STDIN.gets.strip
-        print "Enter an email: "
-        contact_entry.email = STDIN.gets.strip
-        contact_entry.save
-
-        print "Would you like to add a phone number? (Y for YES)"
-        if STDIN.gets.upcase.strip == 'Y'
-          print "Enter a number: "
-          contact_entry.add_number(STDIN.gets.strip)
-          puts "Added number to #{contact_entry}"
+        query_result = Contact.find(id)
+        if query_result
+          print "Enter a name: "
+          query_result.name = STDIN.gets.strip
+          print "Enter an email: "
+          query_result.email = STDIN.gets.strip
+          query_result.save
+        else
+          puts "No contact details for this ID."
         end
 
       when "destroy"
         id = arguments.shift.to_i
-        contact_entry = Contact.find(id)
-        if contact_entry
-          contact_entry.destroy
+        query_result = Contact.find(id)
+        if query_result
+          query_result.destroy
         else
           puts "Contact does not exist."
+        end
+
+      when "number"
+        id = arguments.shift.to_i
+        query_result = Contact.find(id)
+        if query_result
+          print "Enter a number: "
+          query_result.numbers.create(phone_number: STDIN.gets.strip)
+          puts "Added number to #{query_result.name}"
+        else
+          puts "No contact details for this ID."
         end
 
       else
@@ -93,9 +105,11 @@ class ContactList
     puts "Here is a list of available commands:"
     puts "  new - Create a new contact"
     puts "  list - List all contacts"
-    puts "  show - Show a contact's including phone numbers"
-    puts "  search - Search contacts"
-    puts "  update - Update contacts"
+    puts "  show <id>- Show a contact's details including phone numbers"
+    puts "  search <term>- Searches contacts in either email or name by the term."
+    puts "  update <id> - Update contact with that id"
+    # TODO - Add a add/delete option to the number case statement
+    puts "  number <id> - Add number to a contact with that id"
   end
 
 end
